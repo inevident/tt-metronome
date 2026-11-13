@@ -17,7 +17,7 @@ import sys
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import FallingEdge, ReadOnly, RisingEdge
+from cocotb.triggers import FallingEdge, RisingEdge
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 from metro.asm import assemble                      # noqa: E402
@@ -51,19 +51,21 @@ class Bench:
         dut.uio_in.value = 0
         # two clocks with nothing checked: flops are unknown until the first
         # reset edge and the synchronisers until the second
+        await FallingEdge(dut.clk)
         for _ in range(2):
             await self.step(0, 1, 0, check=False)
 
     async def step(self, rst_n, ui, uio, check=True):
         """one clock. returns (uo_out, uio_out, uio_oe) read from the chip."""
         dut = self.dut
-        await FallingEdge(dut.clk)
+        # inputs change on a falling edge and outputs are read on the next one,
+        # half a clock after the rising edge, so gate delays have settled
         dut.rst_n.value = rst_n
         dut.ui_in.value = ui
         dut.uio_in.value = uio
         await RisingEdge(dut.clk)
         want = self.model.clock(rst_n, ui, uio)
-        await ReadOnly()
+        await FallingEdge(dut.clk)
         self.n += 1
         if not check:
             return None
