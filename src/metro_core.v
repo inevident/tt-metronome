@@ -26,7 +26,7 @@ module metro_core #(
                     (RAMB > 16)  ? 5 : (RAMB > 8)  ? 4 : (RAMB > 4)  ? 3 :
                     (RAMB > 2)   ? 2 : 1;             // ram address bits
 
-    integer i0, i1, i2, i3;
+    integer i0, i1, i2;
 
     // input synchronisers. no reset, they just follow the pads
     reg [7:0] s1_ui, s2_ui, s1_uio, s2_uio;
@@ -41,7 +41,7 @@ module metro_core #(
     reg          running, loaded, cs_d, sck_d;
     reg  [3:0]   bitcnt;
     reg  [PW-1:0] laddr;
-    reg  [15:0]  shreg;
+    reg  [14:0]  shreg;
 
     wire l_cs   = s2_ui[0];
     wire l_sck  = s2_ui[1];
@@ -68,7 +68,7 @@ module metro_core #(
             end
             if (l_cs & ~cs_d & loaded) running <= 1'b1;
         end
-        if (l_shift) shreg <= l_word;
+        if (l_shift) shreg <= l_word[14:0];
     end
 
     // program memory. ir is the instruction that runs next clock
@@ -82,7 +82,7 @@ module metro_core #(
     end
 
     // state
-    reg [1:0]    ir_th;                // thread that owns the current clock
+    reg [TI-1:0] ir_th;                // thread that owns the current clock
     reg          ir_v;                 // 0 = idle slot
     reg [1:0]    phase;                // position in the 4-clock schedule
     reg [7:0]    sched;                // thread id for each phase, 2 bits each
@@ -112,7 +112,7 @@ module metro_core #(
     wire [7:0]    imm  = ir[7:0];
     wire [1:0]    xx   = ir[9:8];
     wire [4:0]    pin  = ir[4:0];
-    wire [TI-1:0] t    = ir_th[TI-1:0];
+    wire [TI-1:0] t    = ir_th;
     wire          ex   = running & ir_v;
 
     wire [7:0]    a    = regs[{t, rd}];
@@ -128,8 +128,8 @@ module metro_core #(
     wire        pinv = pin_all[pin];
     wire        latv = latch_all[pin];
 
-    wire [7:0]    ram_addr = (op == 4'hB) ? imm : b;
-    wire [7:0]    ram_rd   = ram[ram_addr[RW-1:0]];
+    wire [RW-1:0] ram_addr = (op == 4'hB) ? imm[RW-1:0] : b[RW-1:0];
+    wire [7:0]    ram_rd   = ram[ram_addr];
 
     reg [7:0] thr_rd;
     always @* begin
@@ -342,14 +342,14 @@ module metro_core #(
     always @* begin
         f_pc = {PW{1'b0}}; f_run = 1'b0;
         for (i1 = 0; i1 < NT; i1 = i1 + 1) begin
-            if (nth == i1) begin
-                if (do_ && start && xx == i1) begin
+            if (nth == i1[1:0]) begin
+                if (do_ && start && xx == i1[1:0]) begin
                     f_pc = tgt; f_run = 1'b1;
                 end else begin
-                    f_pc  = (do_ && t == i1) ? npc : pc[i1];
+                    f_pc  = (do_ && t == i1[TI-1:0]) ? npc : pc[i1];
                     f_run = run[i1];
-                    if (do_ && t == i1 && halt)  f_run = 1'b0;
-                    if (do_ && stop && xx == i1) f_run = 1'b0;
+                    if (do_ && t == i1[TI-1:0] && halt)  f_run = 1'b0;
+                    if (do_ && stop && xx == i1[1:0]) f_run = 1'b0;
                 end
             end
         end
@@ -359,7 +359,7 @@ module metro_core #(
     // state update
     always @(posedge clk) begin
         if (!rst_n) begin
-            ir_th <= 2'd0;  ir_v <= 1'b1;  phase <= 2'd0;  sched <= 8'h00;
+            ir_th <= {TI{1'b0}};  ir_v <= 1'b1;  phase <= 2'd0;  sched <= 8'h00;
             run   <= {{(NT-1){1'b0}}, 1'b1};
             fault <= {NT{1'b0}};  zf <= {NT{1'b0}};  cf <= {NT{1'b0}};
             tick  <= {NT{1'b0}};  ovr <= {NT{1'b0}};
@@ -373,7 +373,7 @@ module metro_core #(
             for (i2 = 0; i2 < RAMB; i2 = i2 + 1) ram[i2]  <= 8'h00;
         end else if (running) begin
             phase <= pn;
-            ir_th <= nth;
+            ir_th <= nth[TI-1:0];
             ir_v  <= f_run;
 
             if (do_) begin
@@ -405,42 +405,43 @@ module metro_core #(
                         default: ;
                     endcase
                 end
-                if (ram_w) ram[ram_addr[RW-1:0]] <= a;
+                if (ram_w) ram[ram_addr] <= a;
 
                 // start and stop come last so they win when a thread targets itself
                 for (i2 = 0; i2 < NT; i2 = i2 + 1) begin
-                    if (start && xx == i2) begin
+                    if (start && xx == i2[1:0]) begin
                         run[i2] <= 1'b1;  fault[i2] <= 1'b0;  pc[i2] <= tgt;
                     end
-                    if (stop && xx == i2) run[i2] <= 1'b0;
+                    if (stop && xx == i2[1:0]) run[i2] <= 1'b0;
                 end
             end
 
             // one timer per thread, counting every clock
             for (i2 = 0; i2 < NT; i2 = i2 + 1) begin
-                if (do_ && t == i2 && (trst || tph)) begin
+                if (do_ && t == i2[TI-1:0] && (trst || tph)) begin
                     cnt[i2]  <= trst ? per[i2] : {1'b0, per[i2][15:1]};
                     tick[i2] <= 1'b0;
                 end else begin
                     cnt[i2] <= (cnt[i2] == 16'd0) ? per[i2] : cnt[i2] - 16'd1;
                     if (cnt[i2] == 16'd0)                tick[i2] <= 1'b1;
-                    else if (do_ && t == i2 && consume)  tick[i2] <= 1'b0;
-                    if (cnt[i2] == 16'd0 && tick[i2] && !(do_ && t == i2 && consume))
+                    else if (do_ && t == i2[TI-1:0] && consume)  tick[i2] <= 1'b0;
+                    if (cnt[i2] == 16'd0 && tick[i2] && !(do_ && t == i2[TI-1:0] && consume))
                         ovr[i2] <= 1'b1;                 // tick arrived before the last one was used
-                    else if (do_ && t == i2 && ovr_clr)
+                    else if (do_ && t == i2[TI-1:0] && ovr_clr)
                         ovr[i2] <= 1'b0;
                 end
-                if (do_ && t == i2 && perl_w) per[i2][7:0]  <= imm;
-                if (do_ && t == i2 && perh_w) per[i2][15:8] <= imm;
+                if (do_ && t == i2[TI-1:0] && perl_w) per[i2][7:0]  <= imm;
+                if (do_ && t == i2[TI-1:0] && perh_w) per[i2][15:8] <= imm;
             end
         end else begin
             // waiting for a program: keep thread 0's first instruction ready
-            ir_th <= 2'd0;  ir_v <= 1'b1;  phase <= 2'd0;
+            ir_th <= {TI{1'b0}};  ir_v <= 1'b1;  phase <= 2'd0;
         end
     end
 
 `ifdef METRO_DEBUG
     // flattened per-thread state, for the testbench only
+    integer i3;
     reg [NT*8-1:0]   dbg_pc;
     reg [NT*64-1:0]  dbg_regs;
     reg [NT*16-1:0]  dbg_cnt, dbg_per;
