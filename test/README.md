@@ -1,47 +1,10 @@
-# Sample testbench for a Tiny Tapeout project
+# Tests
 
-This is a sample testbench for a Tiny Tapeout project. It uses [cocotb](https://docs.cocotb.org/en/stable/) to drive the DUT and check the outputs.
-See below to get started or for more information, check the [website](https://tinytapeout.com/hdl/testing/).
+The tests load a program through the chip's loader pins, run it, and compare the Verilog with `tools/metro/emu.py` after every clock.
 
-## Setting up
+- `test_uart_hello` runs `programs/uart_hello.s` and decodes the serial output.
+- `test_directed` runs the programs in `directed/`. These cover cases random programs rarely reach.
+- `test_random_lockstep` runs random programs with random pin activity.
+- `test_reset_while_running` resets in the middle of a program and loads another.
 
-1. Edit [Makefile](Makefile) and modify `PROJECT_SOURCES` to point to your Verilog files.
-2. Edit [tb.v](tb.v) and replace `tt_um_example` with your module name.
-
-## How to run
-
-To run the RTL simulation:
-
-```sh
-make -B
-```
-
-To run gatelevel simulation, first harden your project and copy `../runs/wokwi/results/final/verilog/gl/{your_module_name}.v` to `gate_level_netlist.v`.
-
-Then run:
-
-```sh
-make -B GATES=yes
-```
-
-If you wish to save the waveform in VCD format instead of FST format, edit tb.v to use `$dumpfile("tb.vcd");` and then run:
-
-```sh
-make -B FST=
-```
-
-This will generate `tb.vcd` instead of `tb.fst`.
-
-## How to view the waveform file
-
-Using GTKWave
-
-```sh
-gtkwave tb.fst tb.gtkw
-```
-
-Using Surfer
-
-```sh
-surfer tb.fst
-```
+Run them with `python test/run.py` from the repo root, or `make` here. `make GATES=yes` is the gate-level run used by the GDS workflow.
